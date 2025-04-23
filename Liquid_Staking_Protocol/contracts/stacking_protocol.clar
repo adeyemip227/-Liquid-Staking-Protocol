@@ -175,3 +175,48 @@
       (as-contract (stx-transfer? amount tx-sender tx-sender))
     )
   ))
+
+  ;; Distribute staking rewards (called by the protocol or an external source)
+(define-public (distribute-rewards (reward-amount uint))
+  (let (
+      (total-staked (var-get total-staked-stx))
+      (protocol-fee (var-get protocol-fee-percent))
+      (fee-amount (/ (* reward-amount protocol-fee) u10000))
+      (distributable-amount (- reward-amount fee-amount))
+      (reward-per-token (if (> total-staked u0)
+                          (/ (* distributable-amount (var-get exchange-rate-precision)) total-staked)
+                          u0))
+    )
+    (begin
+      (asserts! (is-eq tx-sender (var-get protocol-owner)) ERR_UNAUTHORIZED)
+      (asserts! (> reward-amount u0) ERR_INVALID_PARAMETER)
+      
+      ;; Update accumulated rewards
+      (var-set accumulated-rewards-per-token 
+        (+ (var-get accumulated-rewards-per-token) reward-per-token))
+      
+      ;; Send fee to protocol owner
+      (as-contract (stx-transfer? fee-amount tx-sender (var-get protocol-owner)))
+      
+      (ok true)
+    )
+  ))
+
+  ;; Claim pending rewards
+(define-public (claim-rewards)
+  (let (
+      (staked-balance (default-to u0 (map-get? staker-balances tx-sender)))
+      (reward-debt (default-to u0 (map-get? staker-reward-debt tx-sender)))
+      (accumulated (var-get accumulated-rewards-per-token))
+      (pending-reward (/ (* staked-balance (- accumulated reward-debt)) (var-get exchange-rate-precision)))
+    )
+    (begin
+      (asserts! (> pending-reward u0) ERR_NOT_ENOUGH_FUNDS)
+      
+      ;; Update reward debt to current level
+      (map-set staker-reward-debt tx-sender (* staked-balance accumulated))
+      
+      ;; Transfer rewards
+      (as-contract (stx-transfer? pending-reward tx-sender tx-sender))
+    )
+  ))
