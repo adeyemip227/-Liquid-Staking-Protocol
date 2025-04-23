@@ -220,3 +220,58 @@
       (as-contract (stx-transfer? pending-reward tx-sender tx-sender))
     )
   ))
+
+
+;; Pause/unpause staking
+(define-public (set-staking-status (enabled bool))
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-owner)) ERR_UNAUTHORIZED)
+    (var-set staking-enabled enabled)
+    (ok true)))
+
+;; Update protocol fee
+(define-public (update-protocol-fee (new-fee-percent uint))
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-owner)) ERR_UNAUTHORIZED)
+    (asserts! (<= new-fee-percent u1000) ERR_INVALID_PARAMETER) ;; Max 10%
+    (var-set protocol-fee-percent new-fee-percent)
+    (ok true)))
+
+;; Update cooldown period
+(define-public (update-cooldown-period (blocks uint))
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-owner)) ERR_UNAUTHORIZED)
+    (var-set unstaking-cooldown-blocks blocks)
+    (ok true)))
+
+;; Read-only function to check pending rewards
+(define-read-only (get-pending-rewards (staker principal))
+  (let (
+      (staked-balance (default-to u0 (map-get? staker-balances staker)))
+      (reward-debt (default-to u0 (map-get? staker-reward-debt staker)))
+      (accumulated (var-get accumulated-rewards-per-token))
+      (pending-reward (/ (* staked-balance (- accumulated reward-debt)) (var-get exchange-rate-precision)))
+    )
+    pending-reward))
+
+;; Read-only function to check unstaking request
+(define-read-only (get-unstaking-request (staker principal))
+  (map-get? unstaking-requests { staker: staker }))
+
+;; Read-only function to get total protocol stats
+(define-read-only (get-protocol-stats)
+  {
+    total-staked: (var-get total-staked-stx),
+    total-liquid-tokens: (unwrap-panic (get-total-supply)),
+    exchange-rate: (unwrap-panic (get-exchange-rate)),
+    staking-enabled: (var-get staking-enabled),
+    fee-percent: (var-get protocol-fee-percent),
+    cooldown-blocks: (var-get unstaking-cooldown-blocks)
+  })
+
+;; Transfer protocol ownership
+(define-public (transfer-ownership (new-owner principal))
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-owner)) ERR_UNAUTHORIZED)
+    (var-set protocol-owner new-owner)
+    (ok true)))
