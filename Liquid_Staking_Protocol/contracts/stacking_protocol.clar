@@ -93,3 +93,34 @@
   (begin
     (asserts! (is-eq tx-sender sender) ERR_UNAUTHORIZED)
     (ft-transfer? lstSTX amount sender recipient)))
+
+
+    ;; Stake STX to the protocol
+(define-public (stake)
+  (let 
+    (
+      (amount (stx-get-balance tx-sender))
+      (current-exchange-rate (unwrap-panic (get-exchange-rate)))
+      (tokens-to-mint (div-down (* amount (var-get exchange-rate-precision)) current-exchange-rate))
+    )
+    (begin
+      (asserts! (var-get staking-enabled) ERR_CONTRACT_FROZEN)
+      (asserts! (> amount u0) ERR_INSUFFICIENT_BALANCE)
+      
+      ;; Update staking balances
+      (map-set staker-balances tx-sender (+ (default-to u0 (map-get? staker-balances tx-sender)) amount))
+      (var-set total-staked-stx (+ (var-get total-staked-stx) amount))
+      
+      ;; Update reward debt
+      (map-set staker-reward-debt 
+        tx-sender 
+        (+ (default-to u0 (map-get? staker-reward-debt tx-sender)) 
+           (* amount (var-get accumulated-rewards-per-token))))
+      
+      ;; Transfer STX to contract
+      (unwrap! (stx-transfer? amount tx-sender (as-contract tx-sender)) ERR_TRANSFER_FAILED)
+      
+      ;; Mint lstSTX tokens
+      (ft-mint? lstSTX tokens-to-mint tx-sender)
+    )
+  ))
