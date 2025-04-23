@@ -124,3 +124,54 @@
       (ft-mint? lstSTX tokens-to-mint tx-sender)
     )
   ))
+
+
+  ;; Request unstaking - initiates the cooldown period
+(define-public (request-unstake (amount uint))
+  (let (
+      (lstSTX-balance (unwrap-panic (get-balance tx-sender)))
+      (current-exchange-rate (unwrap-panic (get-exchange-rate)))
+      (stx-equivalent (mul-down amount current-exchange-rate))
+    )
+    (begin
+      (asserts! (<= amount lstSTX-balance) ERR_INSUFFICIENT_BALANCE)
+      (asserts! (> amount u0) ERR_INVALID_PARAMETER)
+      
+      ;; Burn lstSTX tokens
+      (ft-burn? lstSTX amount tx-sender)
+      
+      ;; Create unstaking request
+      (map-set unstaking-requests
+        { staker: tx-sender }
+        { 
+          amount: stx-equivalent,
+          available-at-block: (+ block-height (var-get unstaking-cooldown-blocks))
+        }
+      )
+      
+      ;; Update staking totals
+      (var-set total-staked-stx (- (var-get total-staked-stx) stx-equivalent))
+      
+      (ok stx-equivalent)
+    )
+  ))
+
+  ;; Complete unstaking after cooldown
+(define-public (complete-unstake)
+  (let (
+      (request (default-to { amount: u0, available-at-block: u0 } 
+                (map-get? unstaking-requests { staker: tx-sender })))
+      (amount (get amount request))
+      (available-at (get available-at-block request))
+    )
+    (begin
+      (asserts! (> amount u0) ERR_INSUFFICIENT_BALANCE)
+      (asserts! (<= available-at block-height) ERR_COOLDOWN_PERIOD)
+      
+      ;; Clear the unstaking request
+      (map-delete unstaking-requests { staker: tx-sender })
+      
+      ;; Transfer STX back to user
+      (as-contract (stx-transfer? amount tx-sender tx-sender))
+    )
+  ))
