@@ -70,3 +70,26 @@
 
 (define-read-only (get-staking-status)
   (var-get staking-enabled))
+
+
+(define-read-only (get-exchange-rate)
+  (let ((total-supply (unwrap-panic (get-total-supply))))
+    (if (is-eq total-supply u0)
+      (ok (var-get exchange-rate-precision)) ;; 1:1 when empty
+      (ok (div-down (mul-down (var-get total-staked-stx) (var-get exchange-rate-precision)) total-supply)))))
+
+;; Helper functions for safe math
+(define-private (div-down (a uint) (b uint))
+  (if (is-eq b u0)
+    u0
+    (/ a b)))
+
+
+(define-private (mul-down (a uint) (b uint))
+  (/ (* a b) (var-get exchange-rate-precision)))
+
+;; Transfer tokens
+(define-public (transfer (amount uint) (sender principal) (recipient principal) (memo (optional (buff 34))))
+  (begin
+    (asserts! (is-eq tx-sender sender) ERR_UNAUTHORIZED)
+    (ft-transfer? lstSTX amount sender recipient)))
