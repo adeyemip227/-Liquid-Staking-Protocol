@@ -275,3 +275,40 @@
     (asserts! (is-eq tx-sender (var-get protocol-owner)) ERR_UNAUTHORIZED)
     (var-set protocol-owner new-owner)
     (ok true)))
+
+;; Emergency withdrawal function - only callable by protocol owner in emergency situations
+(define-public (emergency-withdraw (amount uint) (recipient principal))
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-owner)) ERR_UNAUTHORIZED)
+    (asserts! (>= (var-get total-staked-stx) amount) ERR_INSUFFICIENT_BALANCE)
+    
+    ;; Update total staked amount
+    (var-set total-staked-stx (- (var-get total-staked-stx) amount))
+    
+    ;; Disable staking to prevent further deposits during emergency
+    (var-set staking-enabled false)
+    
+    ;; Transfer requested amount to recipient
+    (as-contract (stx-transfer? amount tx-sender recipient))
+    
+    (ok true)))
+
+;; Get comprehensive user staking information
+(define-read-only (get-user-position (user principal))
+  (let (
+    (staked-balance (default-to u0 (map-get? staker-balances user)))
+    (lstSTX-balance (unwrap-panic (get-balance user)))
+    (current-exchange-rate (unwrap-panic (get-exchange-rate)))
+    (pending-rewards (get-pending-rewards user))
+    (unstaking-request (get-unstaking-request user))
+  )
+  {
+    staked-stx: staked-balance,
+    liquid-tokens: lstSTX-balance,
+    stx-equivalent: (mul-down lstSTX-balance current-exchange-rate),
+    pending-rewards: pending-rewards,
+    unstaking-request: unstaking-request,
+    total-value: (+ (mul-down lstSTX-balance current-exchange-rate) 
+                   (default-to u0 (get amount unstaking-request)) 
+                   pending-rewards)
+  }))
